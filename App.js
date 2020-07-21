@@ -1,8 +1,9 @@
 import 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import React, {useState, Component} from 'react';
+import React, {useState, Component, useEffect, createContext} from 'react';
 import BLEManager from "react-native-ble-manager";
+import AsyncStorage from '@react-native-community/async-storage';
 import {
   Platform,
   PermissionsAndroid,
@@ -16,6 +17,7 @@ import {
   Switch,
   NativeModules,
   NativeEventEmitter,
+  Alert,
 } from 'react-native';
 
 import {
@@ -29,12 +31,19 @@ import {
 const BLEManagerModule = NativeModules.BLEManager;
 const BLEManagerEmitter = new NativeEventEmitter(BLEManagerModule);
 
+BLEManagerEmitter.addListener('BleManagerDiscoverPeripheral',(data) => 
+    {
+      console.log(data) // Name of peripheral device
+    });
+
+BLEManager.start({showAlert: false});
+
 const Stack = createStackNavigator();
 
 if (Platform.OS === 'android' && Platform.Version >= 23) {
   PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION).then((result) => {
       if (result) {
-        console.log("Permission is OK");
+        //console.log("Permission is OK");
       } else {
         PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION).then((result) => {
           if (result) {
@@ -47,11 +56,42 @@ if (Platform.OS === 'android' && Platform.Version >= 23) {
 });
 }
 
+BLEManager.scan([], 5)
+
+BLEManagerEmitter.addListener('BleManagerDiscoverPeripheral', (peripheral) => {
+
+  console.log(peripheral);
+  
+});
+
+const storeData = async () => {
+  try {
+    await AsyncStorage.setItem('@PotentialCarrier', PotentialCarrier);
+  } catch (error) {
+    alert("Error");
+  }
+};
+
+const getData = async () => {
+  try {
+    const value = await AsyncStorage.getItem('@PotentialCarrier');
+    if(value !== null) {
+      PotentialCarrier = value;
+    }
+  } catch(e) {
+    alert("Error")
+  }
+}
+
 function Questions({ navigation }) {
   
-  const [isEnabled1, SetEnabled1] = useState(false);
-  const [isEnabled2, SetEnabled2] = useState(false);
+  const [TestedCovid, SetEnabled1] = useState(false);
+  const [ContactCovid, SetEnabled2] = useState(false);
   const [isEnabled3, SetEnabled3] = useState(false);
+
+  useEffect(() => {
+    getData()
+  }, [])
 
   return (
     <>
@@ -64,11 +104,11 @@ function Questions({ navigation }) {
           <View style={styles.body}>
             <View style={styles.sectionContainer}>
 
-              <Text style={styles.sectionTitle}>Question 1</Text>
+              <Text style={styles.sectionTitle}>Have you ever tested positive for Covid-19?</Text>
               
               <Switch
               style={styles.switchStyle}
-              value={isEnabled1}
+              value={TestedCovid}
               onValueChange={SetEnabled1}
               />
 
@@ -76,11 +116,11 @@ function Questions({ navigation }) {
 
             <View style={styles.sectionContainer}>
 
-              <Text style={styles.sectionTitle}>Question 2</Text>
+              <Text style={styles.sectionTitle}>Have you ever been in contact with someone who has tested positive with Covid-19?</Text>
               
               <Switch
               style={styles.switchStyle}
-              value={isEnabled2}
+              value={ContactCovid}
               onValueChange={SetEnabled2}
               />
 
@@ -102,7 +142,17 @@ function Questions({ navigation }) {
               <Button 
               style={styles.buttonStyle}
               title="Submit"
-              onPress={()=>navigation.navigate('Main')}
+              onPress={()=>{
+                storeData;
+                if (TestedCovid) {
+                PotentialCarrier = true; navigation.navigate('Main')
+              } else if (ContactCovid) {
+                PotentialCarrier = true; navigation.navigate('Main')
+              } else if (TestedCovid && ContactCovid) {
+                PotentialCarrier = true; navigation.navigate('Main')
+              }
+              }
+             }
               />
             </View>
 
@@ -113,15 +163,34 @@ function Questions({ navigation }) {
   );
 }
 
+global.CheckP;
+
 function Main({ navigation }) {
+
+  const [BLEEnabled, SetBLE] = useState("disabled");
+
+  BLEManagerEmitter.addListener("BleManagerDidUpdateState", (args) => {
+    SetBLE("disabled");
+  });
+
+  BLEManager.enableBluetooth().then(() => {
+    SetBLE("enabled");
+  })
+  .catch((error) => {
+    Alert.alert('You need to enable bluetooth to use this app.');
+    console.log(error)
+  });
+
+  getCheckP('https://vktpfvnh04.execute-api.us-east-1.amazonaws.com/covid-checkpoint-1');
+
   return (
     <>
       <View style={{flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 32}}>
-        <Text style={styles.sectionDescription}>Nearest Stationary Device </Text>
+        <Text style={styles.sectionDescription}>{'Nearest Stationary Device\n' + CheckP.tempID}</Text>
       </View>
 
       <View style={{flex: 1, alignItems: 'center', justifyContent: 'flex-start'}}>
-  <Text style={styles.sectionDescription} onPress={() => console.log(BLEManager.enableBluetooth)}>Bluetooth is {}</Text>
+        <Text style={styles.sectionDescription} onPress={() => BLEManager.enableBluetooth()}>Bluetooth is {BLEEnabled}</Text>
       </View>
 
       <View style={{flex: 1, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 50}}>
@@ -129,12 +198,38 @@ function Main({ navigation }) {
       </View>
     </>
   );
+
+}
+
+
+global.PotentialCarrier = null;
+
+async function getCheckP(URL) {
+  try {
+    let response = await fetch(
+      URL, 
+    );
+    let responseJson = await response.json();
+    //console.log(responseJson);
+    CheckP = responseJson;
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function App() {
+
+  const MainView = "Questions";
+
+  if (PotentialCarrier != null) {
+    MainView = "Main";
+  }
+
+  console.log(PotentialCarrier + " " + MainView);
+
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName="Questions">
+      <Stack.Navigator initialRouteName={MainView}>
         <Stack.Screen name="Questions" component={Questions} options={{headerLeft: null, headerTitleAlign: 'center', title: 'Covid-19 Questions'}} />
         <Stack.Screen name="Main" component={Main} options={{headerTitleAlign: 'center', headerLeft: null, title: 'Bluetooth Tracing'}} />
       </Stack.Navigator>
@@ -142,27 +237,6 @@ function App() {
   );
 }
 
-/*const App: () => React$Node = ({Navigation}) => {
-
-  <NavigationContainer>
-
-      <Stack.Navigator>
-        <Stack.Screen
-          name="Questions"
-          component={App}
-          />
-      </Stack.Navigator>
-
-      <Stack.Navigator>
-        <Stack.Screen
-          name="Main"
-          component={Main}
-          />
-      </Stack.Navigator>
-
-    </NavigationContainer>  
-};
-*/
 const styles = StyleSheet.create({
   scrollView: {
     backgroundColor: Colors.lighter,
@@ -177,7 +251,6 @@ const styles = StyleSheet.create({
   sectionContainer: {
     marginTop: 32,
     paddingHorizontal: 24,
-    flex: 1,
     flexDirection: 'row',
   },
   switchStyle: {
@@ -195,6 +268,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '600',
     color: Colors.black,
+    flex: 2,
   },
   sectionDescription: {
     marginTop: 8,
@@ -218,7 +292,5 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
 });
-
-
 
 export default App;
