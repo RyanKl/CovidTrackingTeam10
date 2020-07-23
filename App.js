@@ -27,16 +27,22 @@ import {
   DebugInstructions,
   ReloadInstructions,
 } from 'react-native/Libraries/NewAppScreen';
+import { TextInput } from 'react-native-gesture-handler';
 
 const BLEManagerModule = NativeModules.BLEManager;
 const BLEManagerEmitter = new NativeEventEmitter(BLEManagerModule);
+
+global.PotentialCarrier = null;
+global.CheckP;
 
 BLEManagerEmitter.addListener('BleManagerDiscoverPeripheral',(data) => 
     {
       console.log(data) // Name of peripheral device
     });
 
-BLEManager.start({showAlert: false});
+BLEManager.start({showAlert: false}).catch((error) => {
+  console.log(error);
+});
 
 const Stack = createStackNavigator();
 
@@ -56,7 +62,7 @@ if (Platform.OS === 'android' && Platform.Version >= 23) {
 });
 }
 
-BLEManager.scan([], 5)
+BLEManager.scan([], 5).catch((error) => {});
 
 BLEManagerEmitter.addListener('BleManagerDiscoverPeripheral', (peripheral) => {
 
@@ -64,22 +70,22 @@ BLEManagerEmitter.addListener('BleManagerDiscoverPeripheral', (peripheral) => {
   
 });
 
-const storeData = async () => {
+async function storeData() {
   try {
-    await AsyncStorage.setItem('@PotentialCarrier', PotentialCarrier);
+    await AsyncStorage.setItem('@PotentialCarrier', PotentialCarrier.toString());
   } catch (error) {
-    alert("Error");
+    console.log(error);
   }
 };
 
-const getData = async () => {
+async function getData() {
   try {
     const value = await AsyncStorage.getItem('@PotentialCarrier');
     if(value !== null) {
       PotentialCarrier = value;
     }
   } catch(e) {
-    alert("Error")
+    console.log(e)
   }
 }
 
@@ -87,11 +93,11 @@ function Questions({ navigation }) {
   
   const [TestedCovid, SetEnabled1] = useState(false);
   const [ContactCovid, SetEnabled2] = useState(false);
-  const [isEnabled3, SetEnabled3] = useState(false);
+  const [FeelingIll, SetEnabled3] = useState(false);
 
-  useEffect(() => {
-    getData()
-  }, [])
+  getData;
+
+  getCheckP('https://shrouded-meadow-59669.herokuapp.com/checkpoint/CAA63B87-DA1E-488B-BD8B-C5E04FE06EC2');
 
   return (
     <>
@@ -128,11 +134,11 @@ function Questions({ navigation }) {
 
             <View style={styles.sectionContainer}>
 
-              <Text style={styles.sectionTitle}>Question 3</Text>
+              <Text style={styles.sectionTitle}>Are you feeling ill?</Text>
               
               <Switch
               style={styles.switchStyle}
-              value={isEnabled3}
+              value={FeelingIll}
               onValueChange={SetEnabled3}
               />
 
@@ -143,14 +149,13 @@ function Questions({ navigation }) {
               style={styles.buttonStyle}
               title="Submit"
               onPress={()=>{
-                storeData;
-                if (TestedCovid) {
-                PotentialCarrier = true; navigation.navigate('Main')
-              } else if (ContactCovid) {
-                PotentialCarrier = true; navigation.navigate('Main')
-              } else if (TestedCovid && ContactCovid) {
-                PotentialCarrier = true; navigation.navigate('Main')
-              }
+                if (TestedCovid || ContactCovid || FeelingIll) {
+                  PotentialCarrier = true
+                } else {
+                  PotentialCarrier = false
+                }
+                storeData();
+                navigation.navigate('Main')
               }
              }
               />
@@ -163,11 +168,13 @@ function Questions({ navigation }) {
   );
 }
 
-global.CheckP;
-
 function Main({ navigation }) {
 
   const [BLEEnabled, SetBLE] = useState("disabled");
+  const [TextVal, setTextVal] = useState();
+  const [epoch, setEpoch] = useState(200);
+
+  getData();
 
   BLEManagerEmitter.addListener("BleManagerDidUpdateState", (args) => {
     SetBLE("disabled");
@@ -175,22 +182,33 @@ function Main({ navigation }) {
 
   BLEManager.enableBluetooth().then(() => {
     SetBLE("enabled");
-  })
-  .catch((error) => {
+  }).catch((error) => {
     Alert.alert('You need to enable bluetooth to use this app.');
-    console.log(error)
+    console.log(error + ' TEST');
   });
 
-  getCheckP('https://vktpfvnh04.execute-api.us-east-1.amazonaws.com/covid-checkpoint-1');
+  const nearestCP = CheckP.guid_;
 
   return (
     <>
       <View style={{flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 32}}>
-        <Text style={styles.sectionDescription}>{'Nearest Stationary Device\n' + CheckP.tempID}</Text>
+        <Text style={styles.sectionDescription}>{'Nearest Stationary Device\n' + CheckP.guid_}</Text>
+        <Button 
+              style={styles.buttonStyle}
+              title="Check"
+              onPress={()=>{
+                if (PotentialCarrier == 'true') {
+                  ReportExposed(nearestCP)
+                } else {
+                  CheckExposed(nearestCP, epoch)
+                }
+              }
+             }
+              />
       </View>
 
       <View style={{flex: 1, alignItems: 'center', justifyContent: 'flex-start'}}>
-        <Text style={styles.sectionDescription} onPress={() => BLEManager.enableBluetooth()}>Bluetooth is {BLEEnabled}</Text>
+        <Text style={styles.sectionDescription} onPress={() => BLEManager.enableBluetooth().catch((error) => Alert.alert(error))}>Bluetooth is {BLEEnabled}</Text>
       </View>
 
       <View style={{flex: 1, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 50}}>
@@ -201,31 +219,55 @@ function Main({ navigation }) {
 
 }
 
-
-global.PotentialCarrier = null;
-
 async function getCheckP(URL) {
   try {
     let response = await fetch(
       URL, 
     );
     let responseJson = await response.json();
-    //console.log(responseJson);
     CheckP = responseJson;
   } catch (error) {
     console.error(error);
   }
 }
 
+async function CheckExposed(GUID, epoch) {
+  try {
+    let response = await fetch(
+      'https://shrouded-meadow-59669.herokuapp.com/exposedcheckpoint/' + GUID, 
+    );
+    let responseJson = await response.json();
+      if (responseJson.reverse()[0].epoch == epoch) {
+        Alert.alert("Recent Exposure", "You have been in an area where a potential carrier has recently been.  Covid-19 Testing is advised.")
+      };
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function ReportExposed(GUID) {
+
+    await fetch(
+      'https://shrouded-meadow-59669.herokuapp.com/report', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          guid: GUID,
+          epoch: 200,
+      }),
+    });
+  }
+
 function App() {
 
-  const MainView = "Questions";
+  var MainView = "Questions";
 
   if (PotentialCarrier != null) {
     MainView = "Main";
   }
-
-  console.log(PotentialCarrier + " " + MainView);
 
   return (
     <NavigationContainer>
@@ -260,8 +302,10 @@ const styles = StyleSheet.create({
   },
   buttonStyle: {
 
-    paddingHorizontal: 24,
+    marginHorizontal: 50,
     marginTop: 50,
+    marginBottom: 50,
+    flex: 1
 
   },
   sectionTitle: {
@@ -272,6 +316,7 @@ const styles = StyleSheet.create({
   },
   sectionDescription: {
     marginTop: 8,
+    marginBottom: 10,
     fontSize: 18,
     fontWeight: '400',
     color: Colors.dark,
